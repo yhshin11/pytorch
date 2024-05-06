@@ -416,17 +416,12 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::Float.Scalar(Scalar a) -> float"),
+        TORCH_SELECTIVE_SCHEMA("aten::Float.bool(bool a) -> float"),
         [](Stack& stack) {
-          IValue scalar;
-          pop(stack, scalar);
-          if (scalar.isDouble()) {
-            push(stack, std::move(scalar));
-          } else if (scalar.isComplexDouble()) {
-            push(stack, scalar.toComplexDouble().real());
-          } else {
-            push(stack, static_cast<double>(scalar.toInt()));
-          }
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          bool b;
+          pop(stack, b);
+          push(stack, (float)b);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -439,12 +434,17 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::Float.bool(bool a) -> float"),
+        TORCH_SELECTIVE_SCHEMA("aten::Float.Scalar(Scalar a) -> float"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool b;
-          pop(stack, b);
-          push(stack, (float)b);
+          IValue scalar;
+          pop(stack, scalar);
+          if (scalar.isDouble()) {
+            push(stack, std::move(scalar));
+          } else if (scalar.isComplexDouble()) {
+            push(stack, scalar.toComplexDouble().real());
+          } else {
+            push(stack, static_cast<double>(scalar.toInt()));
+          }
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

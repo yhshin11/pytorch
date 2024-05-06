@@ -817,7 +817,7 @@ struct OperatorGeneratorArgs {
       aliasAnalysisFromSchema())
 
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(     \
-    aten_op, int_op, float_op, complex_op, result)                         \
+    aten_op, int_op, float_op, complex_op, bool_op, result)                \
   OperatorGeneratorArgs(                                                   \
       TORCH_SELECTIVE_SCHEMA(#aten_op "(Scalar a, Scalar b) -> " #result), \
       [](Stack& stack) {                                                   \
@@ -840,11 +840,14 @@ struct OperatorGeneratorArgs {
           } else if (y.isDouble()) {                                       \
             double b = y.toDouble();                                       \
             push(stack, float_op);                                         \
-          } else {                                                         \
+          } else if (y.isInt()) {                                          \
             int64_t b = y.toInt();                                         \
             push(stack, float_op);                                         \
+          } else {                                                         \
+            int64_t b = y.toBool();                                        \
+            push(stack, float_op);                                         \
           }                                                                \
-        } else {                                                           \
+        } else if (x.isInt()) {                                            \
           int64_t a = x.toInt();                                           \
           if (y.isDouble()) {                                              \
             double b = y.toDouble();                                       \
@@ -852,6 +855,21 @@ struct OperatorGeneratorArgs {
           } else if (y.isInt()) {                                          \
             int64_t b = y.toInt();                                         \
             push(stack, int_op);                                           \
+          } else if (y.isBool()) {                                         \
+            int64_t b = y.toBool();                                        \
+            push(stack, int_op);                                           \
+          }                                                                \
+        } else {                                                           \
+          int64_t a = x.toBool();                                          \
+          if (y.isDouble()) {                                              \
+            double b = y.toDouble();                                       \
+            push(stack, float_op);                                         \
+          } else if (y.isInt()) {                                          \
+            int64_t b = y.toInt();                                         \
+            push(stack, int_op);                                           \
+          } else {                                                         \
+            int64_t b = y.toBool();                                        \
+            push(stack, bool_op);                                          \
           }                                                                \
         }                                                                  \
       },                                                                   \
@@ -874,7 +892,7 @@ struct OperatorGeneratorArgs {
       DEFINE_INT_FLOAT_OP(aten_op, op, bool),                            \
       DEFINE_FLOAT_COMPLEX_OP(aten_op, op, bool),                        \
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(     \
-          aten_op, op, op, op, bool),                                    \
+          aten_op, op, op, op, op, bool),                                \
       DEFINE_STR_CMP_OP(aten_op, op)
 
 TORCH_API at::Generator make_generator_for_device(
