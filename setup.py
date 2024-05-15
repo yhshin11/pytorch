@@ -1478,13 +1478,15 @@ def main():
     else:
         torch_package_dir_name = "torch"
         package_dir = {}
-        package_data = {
-            "torch": torch_package_data,
-            "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
-        }
+        package_data = (
+            {
+                "torch": torch_package_data,
+                "torchgen": torchgen_package_data,
+                "caffe2": [
+                    "python/serialized_test/data/operator_test/*.zip",
+                ],
+            },
+        )
 
     setup(
         name=package_name,
@@ -1501,13 +1503,8 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        package_data={
-            "torch": torch_package_data,
-            "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
-        },
+        package_data=package_data,
+        package_dir=package_dir,
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",
