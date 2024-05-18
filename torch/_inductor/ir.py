@@ -3029,7 +3029,7 @@ class Buffer(IRNode):
         assert self.name, self
         return self.name
 
-    def get_device(self):
+    def get_device(self) -> torch.device:
         return self.layout.device
 
     def get_origin_node(self):
@@ -3468,7 +3468,7 @@ class ComputedBuffer(Buffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
-        from .scheduler import pick_loop_order
+        from .scheduler import pick_loop_order  # type: ignore[attr-defined]
 
         if priority_idx is None:
             priority_idx = []
