@@ -1028,7 +1028,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def get_template_node(self):
         for node in self.snodes:
             if node.is_template():
-                return node
+                return node.get_template_node()
         return None
 
     def get_device(self):
