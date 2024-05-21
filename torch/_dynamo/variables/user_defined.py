@@ -820,6 +820,46 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if name == "__dict__":
+            # Create a new ConstDictVariable Tracker with key, values from
+            # self.value __dict__.
+            #
+            # Note that the items and the returned vt is deliberately kept
+            # sourceless. We don't want to reconstruct __dict__, we should
+            # directly use STORE_ATTR for the object reconstruction. Simillary,
+            # we don't want to insert any guards on __dict__ from this tracker.
+            items_vt = {}
+            for key, value in self.value.__dict__.items():
+                if not ConstantVariable.is_literal(key):
+                    unimplemented("key is not constant")
+
+                key_vt = ConstantVariable.create(key)
+                if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+                    value_vt = tx.output.side_effects.load_attr(
+                        self, key, deleted_ok=True
+                    )
+                else:
+                    from .builder import SourcelessBuilder
+
+                    value_vt = SourcelessBuilder.create(tx, value)
+                items_vt[key_vt] = value_vt
+
+            # Check if there are new key additions using side effect infra
+            if tx.output.side_effects.has_pending_mutation(self):
+                mutations_dict = tx.output.side_effects.store_attr_mutations[
+                    self.mutable_local
+                ]
+                for key, value_vt in mutations_dict.items():
+                    if key not in self.value.__dict__:
+                        if not ConstantVariable.is_literal(key):
+                            unimplemented("key is not constant")
+                        items_vt[ConstantVariable.create(key)] = value_vt
+            return variables.ConstDictVariable(
+                items_vt,
+                dict,
+                source=None,
+            )
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
