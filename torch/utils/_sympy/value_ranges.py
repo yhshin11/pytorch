@@ -417,12 +417,14 @@ class SymPyValueRangeAnalysis:
         return r
 
     @staticmethod
-    def trunc_to_int(a, dtype):
-        return ValueRanges.increasing_map(a, TruncToInt)
+    def to_dtype(a, dtype, src_dtype=None):
+        if dtype == torch.float64:
+            return ValueRanges.increasing_map(a, ToFloat)
+        return ValueRanges.unknown()
 
     @staticmethod
-    def to_float(a):
-        return ValueRanges.increasing_map(a, ToFloat)
+    def trunc_to_int(a, dtype):
+        return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
     def not_(a):
