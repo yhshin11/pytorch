@@ -3,7 +3,7 @@ import copy
 import math
 
 from collections import namedtuple
-from typing import Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -11,6 +11,7 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
+from ..scheduler import BaseSchedulerNode
 from ..utils import IndentedBuffer
 from ..virtualized import V
 
@@ -254,6 +255,50 @@ def value_to_cpp(value, cpp_type):
         return f"static_cast<{cpp_type}>({repr(value)})"
 
 
+class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
+    def __init__(
+        self,
+        inner,
+        global_buf=None,
+        local_buf=None,
+        rewrite_index: Optional[
+            Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr]
+        ] = None,
+    ):
+        super().__init__(inner)
+        self.global_buf = global_buf
+        self.local_buf = local_buf
+        self.rewrite_index = rewrite_index
+
+    def localize(self, name: str, index: sympy.Expr):
+        if self.global_buf and name == self.global_buf.get_name():
+            assert self.rewrite_index is not None
+            name = self.local_buf.get_name()
+            index = self.rewrite_index(self, index)
+        return name, index
+
+    def load(self, name: str, index: sympy.Expr):
+        return self._inner.load(*self.localize(name, index))
+
+    def store(self, name, index, value, mode=None):
+        local_buffer_name, local_buffer_index = self.localize(name, index)
+        res = self._inner.store(local_buffer_name, local_buffer_index, value, mode)
+        if (
+            self.global_buf
+            and name == self.global_buf.get_name()
+            and isinstance(V.kernel, Kernel)
+        ):
+            # Remove name of local buffer from Kernel.store_buffer_names
+            # local_buffer_name is added to Kernel.store_buffer_names in Kernel.CSEProxy.store.
+            # A special case is CppVecKernelChecker which uses VecCheckerProxy
+            # instead of CSEProxy, so local_buffer_name is not in store_buffer_names
+            V.kernel.store_buffer_names.discard(local_buffer_name)
+        return res
+
+    def store_reduction(self, name, index, value):
+        return self._inner.store_reduction(*self.localize(name, index), value)
+
+
 class LocalBufferScope:
     """
     This class creates a context that helps to generate code involving Inductor IR with
@@ -268,6 +313,7 @@ class LocalBufferScope:
         self.kernel = kernel
         self.exit_stack = contextlib.ExitStack()
         self.local_buffers: Dict[str, ir.Buffer] = {}
+        self.local_nodes: Dict[str, BaseSchedulerNode] = {}
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -298,17 +344,67 @@ class LocalBufferScope:
 
         self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
 
+        # Set current LocalBufferScope into V
+        self.exit_stack.enter_context(V.set_local_buffer_scope(self))
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.local_buffers.clear()
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
-    def add_local_buffer(self, buffer: ir.Buffer):
+    def add_local_buffer(
+        self, buffer: ir.Buffer, node: Optional[BaseSchedulerNode] = None
+    ):
         assert buffer.get_name() not in self.local_buffers
         self.local_buffers[buffer.get_name()] = buffer
+        if node:
+            self.local_nodes[buffer.get_name()] = node
+            # Patch the buffer's method of should_allocate
+            assert isinstance(node.node, ir.ComputedBuffer)
 
-    def localize_buffer(
+            def should_allocate():
+                # Local Buffer shouldn't allocate globally
+                assert isinstance(node.node, ir.ComputedBuffer)
+                # Never resue this buffer, sinice it's not real allocated.
+                V.graph.never_reuse_buffers.add(node.node.get_name())
+                # Mark this buffer as freed, so that we don't free it later.
+                V.graph.wrapper_code.freed.add(node.node.get_name())
+                return False
+
+            self.exit_stack.enter_context(
+                patch.object(node.node, "should_allocate", should_allocate)
+            )
+
+    def localize_buffer_for_function(
+        self,
+        fn: Callable[..., Any],
+        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr],
+        global_buf: Optional[ir.Buffer] = None,
+        local_buf: Optional[ir.Buffer] = None,
+    ):
+        def inner(node, *index_vars):
+            with V.set_ops_handler(
+                LocalizeBufferHandler(
+                    V.get_ops_handler(),
+                    global_buf=(
+                        global_buf
+                        if global_buf
+                        else next(iter(self.local_nodes.items()))[1].node
+                    ),
+                    local_buf=(
+                        local_buf
+                        if local_buf
+                        else next(iter(self.local_buffers.items()))[1]
+                    ),
+                    rewrite_index=rewrite_index,
+                )
+            ):
+                return fn(node, *index_vars)
+
+        return inner
+
+    def localize_buffer_for_nodes(
         self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
     ) -> List[ir.IRNode]:
         """
@@ -324,34 +420,15 @@ class LocalBufferScope:
         assert len(global_buf.get_size()) == len(local_buf.get_size())
         assert len(nodes) > 0
 
-        class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
-            def __init__(self, inner):
-                super().__init__(inner)
+        def rewrite_index(self, index):
+            index_vars = sorted(
+                [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)],
+                key=str,
+            )
+            index = self.local_buf.layout.make_indexer()(index_vars)
+            return index
 
-            def localize(self, name: str, index: sympy.Expr):
-                if name == global_buf.get_name():
-                    name = local_buf.get_name()
-                    index_vars = sorted(
-                        [
-                            s
-                            for s in index.free_symbols
-                            if symbol_is_type(s, SymT.INDEX)
-                        ],
-                        key=str,
-                    )
-                    index = local_buf.layout.make_indexer()(index_vars)
-                return name, index
-
-            def load(self, name: str, index: sympy.Expr):
-                return self._inner.load(*self.localize(name, index))
-
-            def store(self, name, index, value, mode=None):
-                return self._inner.store(*self.localize(name, index), value, mode)
-
-            def store_reduction(self, name, index, value):
-                return self._inner.store_reduction(*self.localize(name, index), value)
-
-        def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
+        def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
             new_loops = copy.copy(loops)
@@ -362,17 +439,15 @@ class LocalBufferScope:
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = inner_fn_wrapper(new_loops.inner_fn)
+            new_loops.inner_fn = self.localize_buffer_for_function(
+                new_loops.inner_fn,
+                rewrite_index,
+                global_buf,
+                local_buf,
+            )
             return new_node
 
-        def inner_fn_wrapper(inner_fn):
-            def inner(index):
-                with V.set_ops_handler(LocalizeBufferHandler(V.get_ops_handler())):
-                    return inner_fn(index)
-
-            return inner
-
-        return [wrap_inner_fn_for_node(node, inner_fn_wrapper) for node in nodes]
+        return [wrap_inner_fn_for_node(node) for node in nodes]
 
 
 def unify_mask_base_type(
