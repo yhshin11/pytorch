@@ -19,7 +19,7 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
-from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT, prefix_str
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
@@ -57,8 +57,6 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
-
-StrOrExpr = Union[str, sympy.Expr]
 
 
 @lru_cache(None)
@@ -110,6 +108,16 @@ class ConstExprMin(sympy.Min):
     def macro(self, a: str, b: str) -> str:
         return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
 
+block_offsets = {
+    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True)
+    for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+}
+
+block_sizes = {
+    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, nonzero=True)
+    for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+}
+
 
 @dataclasses.dataclass
 class IndexingOptions:
@@ -141,9 +149,9 @@ class BlockPtrOptions:
     constant_offset: sympy.Expr
     shape: List[sympy.Expr]
     strides: List[sympy.Expr]
-    block_shape: List[StrOrExpr]
+    block_shape: List[Expr]
     order: List[int]
-    offsets: List[StrOrExpr]
+    offsets: List[Expr]
     mask_vars: Set[str]
     reshape_suffix: List[str]
 
@@ -151,8 +159,8 @@ class BlockPtrOptions:
     def create(
         *,
         shape: List[sympy.Expr],
-        block_shape: List[StrOrExpr],
-        offsets: List[StrOrExpr],
+        block_shape: List[Expr],
+        offsets: List[Expr],
         strides: List[sympy.Expr],
         constant_offset: sympy.Expr,
         range_trees: List[IterationRangesEntry],
@@ -205,6 +213,17 @@ class BlockPtrOptions:
             reshape_suffix=reshape_suffix,
         )
 
+    def replace_roffset(self, expr: sympy.Expr, replacement: sympy.Expr) -> sympy.Expr:
+        """
+        Replaces instances of roffset with the new expression.
+        """
+        roffset = block_offsets[SymT.RINDEX]
+        return sympy_subs(
+            expr, {roffset: replacement}
+        )
+
+        raise TypeError(f"Unrecognized type: {type(offset)}")
+
     def format(self, name: str, roffset=True) -> str:
         """
         Codegen a call to tl.make_block_ptr()
@@ -219,7 +238,7 @@ class BlockPtrOptions:
         f = V.kernel.index_to_str
         offsets = [*self.offsets]
         if not roffset:
-            offsets = [offset.replace("roffset", "0") for offset in offsets]
+            offsets = [self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets]
         args = [
             f"{name} + ({f(self.constant_offset)})"
             if self.constant_offset != 0
@@ -259,14 +278,18 @@ class BlockPtrOptions:
 
     def advance_roffset(self):
         """Codegen string to pass to tl.advance(name, ...)"""
-        advance = [offset.replace("roffset", "RBLOCK") if "roffset" in offset else "0"]
+        rblock = block_sizes[SymT.RINDEX]
+        advance = [
+            self.replace_roffset(offset, rblock)
+            for offset in self.offsets
+        ]
         return V.kernel.index_to_str(advance)
 
     def has_indirect(self):
         return False  # block_ptr can't do indirect indexing
 
-    def has_rindex(self):
-        return "RBLOCK" in self.block_shape
+    def has_rindex(self) -> bool:
+        return any(free_symbol_is_type(expr, SymT.RINDEX) for expr in self.block_shape)
 
     def has_rmask(self):
         return self.has_rindex()
@@ -1028,13 +1051,17 @@ class TritonKernel(SIMDKernel):
 
         self.codegen_range_tree()
 
-    def _get_block_offset(self, tree: IterationRangesEntry) -> sympy.Symbol:
-        return sympy.Symbol(f"{tree.prefix}offset", integer=True)
+    def _get_symt(self, tree: IterationRangesEntry) -> SymT:
+        prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
+        return prefix_to_symt[tree.prefix]
 
-    def _get_block_size(self, tree: IterationRangesEntry) -> sympy.Symbol:
-        return sympy.Symbol(f"{tree.prefix.upper()}BLOCK", integer=True, nonzero=True)
+    def _get_block_size(self, tree: InterationRangesEntry) -> sympy.Symbol:
+        return block_sizes[self._get_symt(tree)]
 
-    def _get_max_block_size(self, tree: IterationRangesEntry) -> int:
+    def _get_block_offset(self, tree: InterationRangesEntry) -> sympy.Symbol:
+        return block_offsets[self._get_symt(tree)]
+
+    def _max_block_size(self, tree: InterationRangesEntry) -> int:
         return TRITON_MAX_BLOCK[tree.prefix.upper()]
 
     def codegen_range_tree(self):
@@ -1182,8 +1209,8 @@ class TritonKernel(SIMDKernel):
                     return None
 
                 shape = [range_tree.numel]
-                block_shape = [self._get_block_size(range_tree).name]
-                block_offsets = [self._get_block_offset(range_tree).name]
+                block_shape = [self._get_block_size(range_tree)]
+                block_offsets = [self._get_block_offset(range_tree)]
 
                 return (shape, block_shape, [m[stride]], block_offsets)
 
@@ -1297,7 +1324,7 @@ class TritonKernel(SIMDKernel):
                 #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
                 #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
                 #  2. Numels are multiples of the maximum possible block size.
-                max_block = self._get_max_block_size(range_tree)
+                max_block = self._max_block_size(range_tree)
                 if any(
                     not sizevars.statically_known_multiple_of(numel, max_block)
                     and not sizevars.statically_known_power_of_2(numel)
@@ -1308,21 +1335,15 @@ class TritonKernel(SIMDKernel):
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 linear_block_size = self._get_block_size(range_tree)
-                block_shape: List[StrOrExpr] = [
+                block_shape: List[Expr] = [
                     ConstExprMin(CeilDiv(linear_block_size, numel), dim)
-                    for numel, dim in zip(slice_numels, dims[:num_dims])
-                ] + [dim for dim in dims[num_dims:]]
+                    for numel, dim in zip(slice_numels, dims)
+                ]
 
                 # Compute block offsets from {xyzr}offset and the matched expressions.
-                # We don't need an offset for loops.
-                offset_symbol = (
-                    self._get_block_offset(range_tree)
-                    if not range_tree.is_loop
-                    else sympy.Integer(0)
-                )
-                block_offsets: List[StrOrExpr] = [
-                    sympy_subs(expr, {index_var: offset_symbol})
-                    for expr in block_index_exprs[:num_dims]
+                block_offsets: List[OrExpr] = [
+                    sympy_subs(expr, {index_var: self._get_block_offset(range_tree)})
+                    for expr in block_index_exprs
                 ]
 
                 return (dims, block_shape, strides, block_offsets)
@@ -1467,7 +1488,8 @@ class TritonKernel(SIMDKernel):
             f"tl.broadcast_to({value}, {self.index_to_str(indexing.reshape_suffix)})"
         )
         # drop any extra size=1 dimensions
-        value = triton_reshape(value, indexing.reshape_suffix, indexing.block_shape)
+        block_shape = [V.kernel.index_to_str(expr) for expr in indexing.block_shape]
+        value = triton_reshape(value, indexing.reshape_suffix, block_shape)
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
