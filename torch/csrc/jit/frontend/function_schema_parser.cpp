@@ -2,11 +2,11 @@
 
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/Optional.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -26,7 +26,7 @@ struct SchemaParser {
   explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
             c10::string_view(str),
-            c10::nullopt,
+            std::nullopt,
             0,
             nullptr,
             Source::DONT_COPY)),

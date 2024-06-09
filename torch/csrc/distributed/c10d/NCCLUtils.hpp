@@ -11,8 +11,8 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <nccl.h>
+#include <optional>
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
@@ -182,7 +182,7 @@ int nccl_nonblocking_timeout();
 // thrown in the NCCL codebase.
 TORCH_API std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    std::optional<std::string> processGroupFailureReason = c10::nullopt);
+    std::optional<std::string> processGroupFailureReason = std::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
 // There are some constrains we set for the debug info writer:
@@ -220,7 +220,7 @@ class NCCLComm {
       : ncclComm_(ncclComm),
         aborted_(false),
         ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(c10::nullopt),
+        commFailureReason_(std::nullopt),
         initialized_(false) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
@@ -248,7 +248,7 @@ class NCCLComm {
     auto comm = std::make_shared<NCCLComm>();
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
-        c10::nullopt);
+        std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     comm->initialized_ = true;
@@ -270,12 +270,12 @@ class NCCLComm {
       C10D_NCCL_CHECK_NONBLOCKING(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
-          c10::nullopt);
+          std::nullopt);
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankConfig(
               &(comm->ncclComm_), numRanks, commId, rank, &config),
-          c10::nullopt);
+          std::nullopt);
       // under blocking mode, comm is initialized after NCCL CHECK
       isInitialized = true;
     }
@@ -300,7 +300,7 @@ class NCCLComm {
       LOG(INFO) << "Communicator was aborted before trying to dump its state.";
       return dump;
     }
-    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), c10::nullopt);
+    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), std::nullopt);
     return dump;
   }
 #endif
@@ -335,7 +335,7 @@ class NCCLComm {
   }
 
   void ncclCommAbort(
-      std::optional<std::string> commFailureReason = c10::nullopt) {
+      std::optional<std::string> commFailureReason = std::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
