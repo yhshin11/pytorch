@@ -3,14 +3,16 @@ import contextlib
 import math
 
 from collections import namedtuple
-from typing import Dict
+from typing import Dict, Tuple
 from unittest.mock import patch
 
 import torch
 from .. import ir
+from ..utils import IndentedBuffer
 from ..virtualized import V
 
-from .common import ExprPrinter, Kernel
+from .common import CSEVariable, ExprPrinter, Kernel
+
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -351,3 +353,22 @@ class LocalBufferScope:
     def add_local_buffer(self, buffer: ir.Buffer):
         assert buffer.get_name() not in self.local_buffers
         self.local_buffers[buffer.get_name()] = buffer
+
+
+def unify_mask_base_type(
+    buffer: IndentedBuffer,
+    vars: Tuple[CSEVariable, ...],
+    dtype=torch.float,
+):
+    """
+    Given list of cse variables,
+    Cast each to new mask base dtype and return casted cse variable.
+    """
+    new_vars = (
+        V.kernel.cse.generate(
+            buffer,
+            f"{V.kernel._get_mask_cast(var, dtype)}",
+        )
+        for var in vars
+    )
+    return new_vars
