@@ -200,6 +200,11 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 
   const auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
 
+  if (!grad_fn && !requires_grad_ && !data.requires_grad() && !(fw_grad_ && !fw_grad_->empty())) {
+    // Avoid detaching if we don't need to.
+    return data;
+  }
+
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
