@@ -871,7 +871,21 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        nodes = body.graph.find_nodes(op="output")
+
+        need_where = False
+        for node in nodes:
+            for arg in node.args:
+                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                    need_where = True
+
+        if nodes and not need_where:
+            with V.kernel.mask_loads(mask, value=other) as new_mask:
+                result = body()
+                result.mask_vars.discard(new_mask)
+                return result
+
+        with V.kernel.mask_loads(mask, value=None) as new_mask:
             result = body()
 
         # Remove once CSEVariables track the dtype
@@ -1291,8 +1305,12 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
+
         if (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = ", other=0.0"
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
