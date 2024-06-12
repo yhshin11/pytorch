@@ -44,6 +44,10 @@ def _is_constant(val: _ExprType):
     return isinstance(val, (int, float, bool))
 
 
+def upper_bound(val: _ExprType):
+    return bound_sympy(val).upper if isinstance(val, sympy.Expr) else val
+
+
 @dataclass
 class TypedExpr:
     """A SymPy expression with associated type"""
@@ -187,9 +191,6 @@ class IndexPropagation:
     def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
-
-        def upper_bound(v):
-            return bound_sympy(v).upper if isinstance(v, sympy.Expr) else v
 
         var_to_range = {
             k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
@@ -345,4 +346,12 @@ class IndexPropagation:
                     dict(lower=not can_prove_lower, upper=not can_prove_upper),
                 )
             return expr
-        return self.fallback("indirect_indexing", (index, size, check), {}).value
+
+        indirect_var = self.fallback(
+            "indirect_indexing", (index, size, check), {}
+        ).value
+        if indirect_var not in self.var_to_range:
+            lower, upper = -upper_bound(size), upper_bound(size) - 1
+            indirect_range = (indirect_var, ValueRanges(lower, upper))
+            self.var_to_range = self.var_to_range + (indirect_range,)
+        return indirect_var
