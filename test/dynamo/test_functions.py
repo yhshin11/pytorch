@@ -2369,6 +2369,17 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_range_with_subscript(self):
+        def fn(x):
+            acc = 1
+            for k in range(2)[1::2]:
+                acc *= acc * k
+            return x * acc
+
+        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_rand_inlined(self):
         @torch.compile(backend="eager", dynamic=True)
         def fn():

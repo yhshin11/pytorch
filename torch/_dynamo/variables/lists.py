@@ -179,10 +179,16 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
+    def getitem_const(self, arg: VariableTracker):
+        return BaseListVariable(self.unpack_var_sequence()).getitem_const(arg)
+
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
 
     def unpack_var_sequence(self, tx):
+        return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
+
+    def unpack_var_sequence(self, tx=None):
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
     def reconstruct(self, codegen):
