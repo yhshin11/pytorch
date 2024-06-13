@@ -442,7 +442,11 @@
   self: grad
   result: auto_linear
 
-- name: _lazy_clone(Tensor self) -> Tensor
+- name: _lazy_clone(Tensor(a) self) -> Tensor(a)
+  self: grad
+  result: auto_linear
+
+- name: _lazy_clone_copy(Tensor self) -> Tensor
   self: grad
   result: auto_linear
 
