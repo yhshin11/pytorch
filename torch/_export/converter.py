@@ -303,7 +303,7 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = get_node_for_param_and_buffer(
-                    self.fx_graph, name, self.is_top_level_graph
+                    self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
                 self.input_specs.append(
@@ -335,7 +335,6 @@ class TS2FXGraphConverter:
                 )
                 fx_node = self.fx_graph.get_attr(alias_name)
                 self.tensor_constants[alias_name] = node.t("value")
-                self.attribute_map[alias_name] = ""
                 value = fx_node
             elif constant_kind == "ival":
                 value = node.ival("value")
@@ -720,5 +719,10 @@ class TS2EPConverter:
         ep._constants = tensor_constants
         for k in tensor_constants:
             ep.state_dict.pop(k, None)
+        for spec in ep.graph_signature.input_specs:
+            # Mark as constant tensors for erroneously traced buffers.
+            if spec.kind == InputKind.BUFFER and spec.target in tensor_constants:
+                spec.kind = InputKind.CONSTANT_TENSOR
+        ep.verifier().check(ep)
 
         return ep
