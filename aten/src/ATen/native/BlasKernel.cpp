@@ -352,11 +352,6 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 
 #endif
 
-static inline float reduce(float32x4_t x) {
-        auto sum = vpaddq_f32(x, x);
-        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
-}
-
 static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
 #ifdef __ARM_FEATURE_FMA
   return vfmaq_f32(a, b, c);
