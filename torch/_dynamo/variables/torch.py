@@ -53,28 +53,34 @@ except ModuleNotFoundError:
 
 log = logging.getLogger(__name__)
 
-supported_ctx_manager_classes = dict.fromkeys(
-    [
-        torch.profiler.profiler.profile,
-        torch.autograd.forward_ad._set_fwd_grad_enabled,
-        torch.autograd.forward_ad.dual_level,
-        torch.autograd.profiler.profile,
-        torch.autograd.profiler.record_function,
-        torch._C.DisableTorchFunctionSubclass,
-        torch._functorch.vmap.vmap_increment_nesting,
-        torch._functorch.eager_transforms.grad_increment_nesting,
-        torch._functorch.eager_transforms.jvp_increment_nesting,
-        torch._functorch.eager_transforms.enable_inplace_requires_grad,
-        torch.amp.autocast_mode.autocast,
-        torch.autograd.grad_mode.enable_grad,
-        torch.autograd.grad_mode.inference_mode,
-        torch.autograd.grad_mode.no_grad,
-        torch.autograd.grad_mode.set_grad_enabled,
-        torch.autograd.graph.disable_saved_tensors_hooks,
-        torch.cpu.amp.autocast_mode.autocast,
-        torch.cuda.amp.autocast_mode.autocast,
-    ]
-)
+
+@functools.lru_cache(None)
+def supported_ctx_manager_classes():
+    import torch.distributed._composable.fsdp
+
+    return dict.fromkeys(
+        [
+            torch.profiler.profiler.profile,
+            torch.autograd.forward_ad._set_fwd_grad_enabled,
+            torch.autograd.forward_ad.dual_level,
+            torch.autograd.profiler.profile,
+            torch.autograd.profiler.record_function,
+            torch._C.DisableTorchFunctionSubclass,
+            torch._functorch.vmap.vmap_increment_nesting,
+            torch._functorch.eager_transforms.grad_increment_nesting,
+            torch._functorch.eager_transforms.jvp_increment_nesting,
+            torch._functorch.eager_transforms.enable_inplace_requires_grad,
+            torch.amp.autocast_mode.autocast,
+            torch.autograd.grad_mode.enable_grad,
+            torch.autograd.grad_mode.inference_mode,
+            torch.autograd.grad_mode.no_grad,
+            torch.autograd.grad_mode.set_grad_enabled,
+            torch.autograd.graph.disable_saved_tensors_hooks,
+            torch.cpu.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast_mode.autocast,
+            torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state,
+        ]
+    )
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
@@ -193,7 +199,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             callable(value)
             and (
                 hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
+                and value in supported_ctx_manager_classes()
             )
         )
 
@@ -203,6 +209,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         from . import (
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
+            FSDPParamGroupUseTrainingStateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -299,6 +306,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
+            )
+        elif (
+            self.value
+            is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
+        ):
+            assert len(args) == 2
+            return FSDPParamGroupUseTrainingStateVariable.create(
+                tx, args[0], args[1].as_python_constant()
             )
 
         return super().call_function(tx, args, kwargs)
