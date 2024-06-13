@@ -417,7 +417,6 @@ class DeviceTypeTestBase(TestCase):
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
-
         def instantiate_test_helper(
             cls, name, *, test, param_kwargs=None, decorator_fn=lambda _: []
         ):
@@ -498,7 +497,12 @@ class DeviceTypeTestBase(TestCase):
             )
 
         # Instantiate the parametrized tests.
-        for test, test_suffix, param_kwargs, decorator_fn in parametrize_fn(  # noqa: B020
+        for (
+            test,
+            test_suffix,
+            param_kwargs,
+            decorator_fn,
+        ) in parametrize_fn(  # noqa: B020
             test, generic_cls, cls
         ):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
@@ -1167,14 +1171,12 @@ class ops(_TestParametrizer):
 #       probably define a new decorator instead (see below).
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
 class skipIf:
-
     def __init__(self, dep, reason, device_type=None):
         self.dep = dep
         self.reason = reason
         self.device_type = device_type
 
     def __call__(self, fn):
-
         @wraps(fn)
         def dep_fn(slf, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
@@ -1190,35 +1192,30 @@ class skipIf:
 
 # Skips a test on CPU if the condition is true.
 class skipCPUIf(skipIf):
-
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="cpu")
 
 
 # Skips a test on CUDA if the condition is true.
 class skipCUDAIf(skipIf):
-
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="cuda")
 
 
 # Skips a test on Lazy if the condition is true.
 class skipLazyIf(skipIf):
-
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="lazy")
 
 
 # Skips a test on Meta if the condition is true.
 class skipMetaIf(skipIf):
-
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="meta")
 
 
 # Skips a test on MPS if the condition is true.
 class skipMPSIf(skipIf):
-
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="mps")
 
@@ -1230,13 +1227,11 @@ class skipHPUIf(skipIf):
 
 # Skips a test on XLA if the condition is true.
 class skipXLAIf(skipIf):
-
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="xla")
 
 
 class skipPRIVATEUSE1If(skipIf):
-
     def __init__(self, dep, reason):
         device_type = torch._C._get_privateuse1_backend_name()
         super().__init__(dep, reason, device_type=device_type)
@@ -1303,12 +1298,10 @@ def largeTensorTest(size, device=None):
 
 
 class expectedFailure:
-
     def __init__(self, device_type):
         self.device_type = device_type
 
     def __call__(self, fn):
-
         @wraps(fn)
         def efail_fn(slf, *args, **kwargs):
             if (
@@ -1334,12 +1327,10 @@ class expectedFailure:
 
 
 class onlyOn:
-
     def __init__(self, device_type):
         self.device_type = device_type
 
     def __call__(self, fn):
-
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
             if self.device_type != slf.device_type:
@@ -1356,7 +1347,6 @@ class onlyOn:
 # Skips the test if the number of available devices of the variant's device
 # type is less than the 'num_required_devices' arg.
 class deviceCountAtLeast:
-
     def __init__(self, num_required_devices):
         self.num_required_devices = num_required_devices
 
@@ -1408,7 +1398,6 @@ def onlyNativeDeviceTypes(fn):
 # explicitly and computed using self.precision (e.g.
 # self.precision *2, max(1, self.precision)).
 class precisionOverride:
-
     def __init__(self, d):
         assert isinstance(
             d, dict
@@ -1474,7 +1463,6 @@ class toleranceOverride:
 # @dtypes(torch.float32, torch.float64)
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
 class dtypes:
-
     def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             for arg in args:
@@ -1504,26 +1492,22 @@ class dtypes:
 
 # Overrides specified dtypes on the CPU.
 class dtypesIfCPU(dtypes):
-
     def __init__(self, *args):
         super().__init__(*args, device_type="cpu")
 
 
 # Overrides specified dtypes on CUDA.
 class dtypesIfCUDA(dtypes):
-
     def __init__(self, *args):
         super().__init__(*args, device_type="cuda")
 
 
 class dtypesIfMPS(dtypes):
-
     def __init__(self, *args):
         super().__init__(*args, device_type="mps")
 
 
 class dtypesIfPRIVATEUSE1(dtypes):
-
     def __init__(self, *args):
         super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
 
@@ -1570,7 +1554,6 @@ def onlyCUDAAndPRIVATEUSE1(fn):
 
 
 def disablecuDNN(fn):
-
     @wraps(fn)
     def disable_cudnn(self, *args, **kwargs):
         if self.device_type == "cuda" and self.has_cudnn():
@@ -1582,7 +1565,6 @@ def disablecuDNN(fn):
 
 
 def disableMkldnn(fn):
-
     @wraps(fn)
     def disable_mkldnn(self, *args, **kwargs):
         if torch.backends.mkldnn.is_available():
@@ -1711,7 +1693,6 @@ def skipCUDAIfNotRocm(fn):
 
 # Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
 def skipCUDAIfRocmVersionLessThan(version=None):
-
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1783,7 +1764,6 @@ def skipCUDAIfVersionLessThan(versions: Tuple[int, int] = None):
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
 def skipCUDAIfCudnnVersionLessThan(version=0):
-
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
